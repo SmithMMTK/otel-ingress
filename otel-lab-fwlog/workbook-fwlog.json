@@ -1,0 +1,406 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# 📡 fwlog — Campaign Pipeline Monitor\nMonitor ingestion → transformation → kafka pipeline performance and state."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "fce7d667-b175-4a1f-b91b-fec44e9e2867",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 604800000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 172800000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ],
+              "allowCustom": true
+            }
+          },
+          {
+            "id": "c8d4e2f1-a3b5-4c6d-8e9f-012345678abc",
+            "version": "KqlParameterItem/1.0",
+            "name": "CmpgnCd",
+            "label": "Campaign",
+            "type": 2,
+            "isRequired": false,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "dependencies\n| where timestamp > ago(30d)\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| extend v = tostring(customDimensions[\"cmpgn_cd\"])\n| where isnotempty(v)\n| summarize by v\n| sort by v asc\n| project value = v, label = v",
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "defaultValue": "value::all",
+            "queryType": 0,
+            "resourceType": "microsoft.insights/components"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 📊 Section 1 · Overall Performance"
+      },
+      "name": "s1-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let sla = datatable(step:string, warn_min:real, crit_min:real)\n[\n    \"ingestion\",       20, 30,\n    \"transformation\",  30, 45,\n    \"kafka\",           60, 90\n];\ndependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend dur_min = duration / 60000.0\n| summarize\n    runs    = count(),\n    avg_min = round(avg(dur_min), 1),\n    p50_min = round(percentile(dur_min, 50), 1),\n    p75_min = round(percentile(dur_min, 75), 1),\n    p95_min = round(percentile(dur_min, 95), 1),\n    max_min = round(max(dur_min), 1)\n    by step = name\n| join kind=leftouter sla on step\n| extend recommendation = case(\n    p95_min > crit_min, \"🔴 Investigate\",\n    p95_min > warn_min, \"🟡 Monitor\",\n    \"🟢 Normal\")\n| project step, runs, avg_min, p50_min, p75_min, p95_min, max_min, recommendation\n| order by p95_min desc",
+        "size": 0,
+        "title": "Process Duration Percentiles (P50 / P75 / P95 / Max) + Recommendation",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "recommendation",
+              "formatter": 18,
+              "formatOptions": {
+                "thresholdsOptions": "colors",
+                "thresholdsGrid": [
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🔴",
+                    "representation": "redBright",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "contains",
+                    "thresholdValue": "🟡",
+                    "representation": "yellow",
+                    "text": "{0}"
+                  },
+                  {
+                    "operator": "Default",
+                    "thresholdValue": null,
+                    "representation": "green",
+                    "text": "{0}"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "p95_min",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "customColumnWidthSetting": "100px"
+              }
+            },
+            {
+              "columnMatch": "avg_min",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue",
+                "customColumnWidthSetting": "100px"
+              }
+            }
+          ],
+          "sortBy": [
+            {
+              "itemKey": "p95_min",
+              "sortOrder": 2
+            }
+          ]
+        }
+      },
+      "name": "q-perf-stats"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where timestamp > ago(30d)\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend pos_dt  = todatetime(customDimensions[\"pos_dt\"])\n| extend dur_min = duration / 60000.0\n| summarize p95_min = round(percentile(dur_min, 95), 1)\n    by pos_dt, step = name\n| order by pos_dt asc",
+        "size": 0,
+        "title": "P95 Duration Trend per Step (minutes)",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "pos_dt",
+          "yAxis": [
+            "p95_min"
+          ],
+          "splitBy": "step",
+          "yAxisLabel": "minutes (P95)",
+          "seriesLabelSettings": [
+            {
+              "seriesName": "ingestion",
+              "color": "blue"
+            },
+            {
+              "seriesName": "transformation",
+              "color": "orange"
+            },
+            {
+              "seriesName": "kafka",
+              "color": "green"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "q-trend-p95"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where timestamp > ago(30d)\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend pos_dt  = todatetime(customDimensions[\"pos_dt\"])\n| extend dur_min = duration / 60000.0\n| summarize avg_min = round(avg(dur_min), 1)\n    by pos_dt, step = name\n| order by pos_dt asc",
+        "size": 0,
+        "title": "Avg Duration Trend per Step (minutes)",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "pos_dt",
+          "yAxis": [
+            "avg_min"
+          ],
+          "splitBy": "step",
+          "yAxisLabel": "minutes (Avg)",
+          "seriesLabelSettings": [
+            {
+              "seriesName": "ingestion",
+              "color": "blue"
+            },
+            {
+              "seriesName": "transformation",
+              "color": "orange"
+            },
+            {
+              "seriesName": "kafka",
+              "color": "green"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "q-trend-avg"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend dur_min  = round(duration / 60000.0, 1)\n| extend cmpgn_cd = tostring(customDimensions[\"cmpgn_cd\"])\n| project timestamp, step = name, cmpgn_cd, dur_min, operation_Id\n| top 20 by dur_min desc",
+        "size": 1,
+        "title": "Slowest 20 Individual Runs",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      },
+      "name": "q-slowest"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 🔄 Section 2 · Pipeline State"
+      },
+      "name": "s2-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend cmpgn_cd = tostring(customDimensions[\"cmpgn_cd\"])\n| extend dur_min  = duration / 60000.0\n| summarize\n    ingestion      = sumif(dur_min, name == \"ingestion\"),\n    transformation = sumif(dur_min, name == \"transformation\"),\n    kafka          = sumif(dur_min, name == \"kafka\"),\n    first_seen     = min(timestamp)\n    by cmpgn_cd\n| project cmpgn_cd,\n          ingestion      = round(ingestion, 1),\n          transformation = round(transformation, 1),\n          kafka          = round(kafka, 1),\n          timestamp      = first_seen\n| order by timestamp desc",
+        "size": 0,
+        "title": "Pipeline Duration per Campaign (minutes, summed)",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      },
+      "name": "q-pipeline"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend cmpgn_cd   = tostring(customDimensions[\"cmpgn_cd\"])\n| extend count_lead = toint(customDimensions[\"count_lead\"])\n| summarize\n    ingestion      = sumif(count_lead, name == \"ingestion\"),\n    transformation = sumif(count_lead, name == \"transformation\"),\n    kafka          = sumif(count_lead, name == \"kafka\"),\n    total          = sum(count_lead),\n    first_seen     = min(timestamp)\n    by cmpgn_cd\n| project cmpgn_cd, ingestion, transformation, kafka, total,\n          timestamp = first_seen\n| order by timestamp desc",
+        "size": 0,
+        "title": "count_lead per Step per Campaign",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ingestion",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue"
+              }
+            },
+            {
+              "columnMatch": "transformation",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "orange"
+              }
+            },
+            {
+              "columnMatch": "kafka",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "green"
+              }
+            },
+            {
+              "columnMatch": "total",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "purple"
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-lead-count"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend cmpgn_cd   = tostring(customDimensions[\"cmpgn_cd\"])\n| extend count_lead = toint(customDimensions[\"count_lead\"])\n| extend pos_dt     = tostring(customDimensions[\"pos_dt\"])\n| summarize total_lead = sum(count_lead) by pos_dt, step = name\n| order by pos_dt asc, step asc",
+        "size": 0,
+        "title": "Lead Volume per Step per Day",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "pos_dt",
+          "yAxis": [
+            "total_lead"
+          ],
+          "splitBy": "step",
+          "aggregation": "Sum",
+          "yAxisLabel": "leads"
+        }
+      },
+      "name": "q-lead"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## ⚠️ Section 3 · Abnormal Operations"
+      },
+      "name": "s3-header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let thresholds = datatable(step:string, max_min:real)\n[\n    \"ingestion\",       30,\n    \"transformation\",  45,\n    \"kafka\",           90\n];\ndependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend step       = name\n| extend actual_min = duration / 60000.0\n| join kind=inner thresholds on step\n| where actual_min > max_min\n| project timestamp, cmpgn_cd = operation_Name, step,\n          actual_min = round(actual_min,1), max_min,\n          source_file = tostring(customDimensions[\"source_file\"])\n| order by actual_min desc",
+        "size": 0,
+        "title": "SLA Threshold Breaches",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "actual_min",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "redGreen",
+                "min": 0
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-sla"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let expected_steps = dynamic([\"ingestion\",\"transformation\",\"kafka\"]);\ndependencies\n| where name in (\"ingestion\",\"transformation\",\"kafka\")\n| where \"value::all\" in ({CmpgnCd}) or tostring(customDimensions[\"cmpgn_cd\"]) in ({CmpgnCd})\n| extend cmpgn_cd = tostring(customDimensions[\"cmpgn_cd\"])\n| summarize completed_steps = make_set(name) by cmpgn_cd\n| extend missing_steps = set_difference(expected_steps, completed_steps)\n| where array_length(missing_steps) > 0\n| project cmpgn_cd, completed_steps, missing_steps\n| order by cmpgn_cd asc",
+        "size": 0,
+        "title": "Campaigns with Missing Pipeline Steps",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      },
+      "name": "q-missing"
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

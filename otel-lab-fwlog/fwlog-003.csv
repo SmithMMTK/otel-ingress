@@ -1,0 +1,3 @@
+process,pos_dt,load_tms,cmpgn_cd,count_lead,duration
+kafka,2026-06-24,2026-06-24T03:40:00.459+07:00,cccs18001001-f14,2,10
+kafka,2026-06-24,2026-06-24T03:40:00.459+07:00,cccs18001002-f14,3,45
