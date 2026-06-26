@@ -30,26 +30,20 @@ union requests, dependencies
 
 ## Query B — 🚨 Detect Crashed / Timed-out Jobs (no heartbeat + no completion)
 ```kusto
-// Alert: heartbeat หยุดส่ง และ job ไม่มี job.complete หรือ job.failed
-let heartbeat_interval_min = 2;  // ปรับให้ตรงกับ --interval ที่ใช้จริง
-let stale_threshold_min    = heartbeat_interval_min * 3;  // missed 3 beats = stale
-
-// jobs ที่เคย start
-let started = dependencies
-    | where timestamp > ago(24h)
-    | where name == "job.heartbeat"
-    | extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
-    | summarize last_heartbeat = max(timestamp), total_beats = count() by cmpgn_cd;
-
-// jobs ที่ complete หรือ failed แล้ว
-let finished = dependencies
+// stale_threshold = interval * 3  (demo ใช้ --interval 20s → 60s → 1 min)
+let stale_threshold_min = 1;
+dependencies
+| where timestamp > ago(24h)
+| where name == "job.heartbeat"
+| extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
+| summarize last_heartbeat = max(timestamp), total_beats = count() by cmpgn_cd
+| join kind=leftanti (
+    dependencies
     | where timestamp > ago(24h)
     | where name in ("job.complete", "job.failed")
     | extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
-    | summarize finished_at = max(timestamp) by cmpgn_cd;
-
-started
-| join kind=leftanti finished on cmpgn_cd   // ยังไม่ complete/failed
+    | summarize by cmpgn_cd
+) on cmpgn_cd
 | extend minutes_since_last_beat = datetime_diff("minute", now(), last_heartbeat)
 | where minutes_since_last_beat > stale_threshold_min
 | project cmpgn_cd, last_heartbeat,
@@ -80,27 +74,22 @@ dependencies
 
 ## Query D — Summary: S1 vs S2 vs S3 Side-by-side
 ```kusto
-let prefix = "cccs18001001-hb1";
-
-// heartbeat summary
-let beats = dependencies
-    | where timestamp > ago(2h)
-    | where name == "job.heartbeat"
-    | where operation_Name startswith prefix
-    | extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
-    | summarize beats = count(), last_beat = max(timestamp) by cmpgn_cd;
-
-// completion summary
-let completions = dependencies
-    | where timestamp > ago(2h)
+// ⚠️ เปลี่ยน "cccs18001001-hb1" ให้ตรงกับ base cmpgn_cd ที่ใช้
+dependencies
+| where timestamp > ago(24h)
+| where name == "job.heartbeat"
+| where tostring(customDimensions["cmpgn_cd"]) startswith "cccs18001001-hb1"
+| extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
+| summarize beats = count(), last_beat = max(timestamp) by cmpgn_cd
+| join kind=leftouter (
+    dependencies
+    | where timestamp > ago(24h)
     | where name in ("job.complete","job.failed")
-    | where operation_Name startswith prefix
+    | where tostring(customDimensions["cmpgn_cd"]) startswith "cccs18001001-hb1"
     | extend cmpgn_cd = tostring(customDimensions["cmpgn_cd"])
     | project cmpgn_cd, outcome = name,
-              elapsed_min = round(toreal(customDimensions["elapsed_sec"]) / 60.0, 1);
-
-beats
-| join kind=leftouter completions on cmpgn_cd
+              elapsed_min = round(toreal(customDimensions["elapsed_sec"]) / 60.0, 1)
+) on cmpgn_cd
 | extend minutes_since_beat = round(datetime_diff("second", now(), last_beat) / 60.0, 1)
 | extend status = case(
     outcome == "job.complete" and elapsed_min <= 1.5, "✅ Success (within SLA)",
